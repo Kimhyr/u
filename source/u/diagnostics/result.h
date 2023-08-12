@@ -134,6 +134,88 @@ private:
 	error_type m_error;
 };
 
+template<typename ErrorType>
+class error
+{
+	static_assert(u::is_valid_error_v<ErrorType>);
+
+public:
+	constexpr error(const error&) = default;
+	constexpr error(error&&) = default;
+
+	template<typename T = ErrorType>
+		requires (!std::is_same_v<std::remove_cvref_t<T>, T>)
+			&& (!std::is_same_v<std::remove_cvref_t<T>, std::in_place_t>)
+			&& std::is_constructible_v<ErrorType, T>
+	constexpr explicit error(T&& error)
+	noexcept(std::is_nothrow_constructible_v<ErrorType, T>)
+		: m_error{std::forward<T>(error)}
+	{}
+
+	template<typename... Ts>
+	constexpr explicit error(std::in_place_t, Ts... args)
+	noexcept(std::is_nothrow_constructible_v<ErrorType, Ts...>)
+		: m_error{std::forward<Ts>(args)...}
+	{}
+
+	template<typename T, typename... Ts>
+		requires std::is_constructible_v<
+			ErrorType,
+			std::initializer_list<T>&,
+			Ts...>
+	constexpr explicit error(
+			std::in_place_t,
+			std::initializer_list<T> list,
+			Ts&&... args)
+	noexcept(std::is_nothrow_constructible_v<
+		ErrorType,
+		std::initializer_list<T>&,
+		Ts...>)
+		: m_error{list, std::forward<Ts>(args)...}
+	{}
+
+	constexpr error& operator=(const error&) = default;
+	constexpr error& operator=(error&&) = default;
+
+	[[nodiscard]]
+	constexpr ErrorType& get() & noexcept
+	{ return this->m_error; }
+
+	[[nodiscard]]
+	constexpr const ErrorType& get() const& noexcept
+	{ return this->m_error; }
+
+	[[nodiscard]]
+	constexpr ErrorType&& get() && noexcept
+	{ return std::move(this->m_error); }
+
+	[[nodiscard]]
+	constexpr const ErrorType&& get() const&& noexcept
+	{ return std::move(this->m_error); }
+
+	template<typename T>
+	[[nodiscard]]
+	friend constexpr bool operator==(
+		const error& left,
+		const error<T>& right)
+	{ return left.m_error == right.get(); }
+
+	constexpr void swap(error& other)
+	noexcept(std::is_nothrow_swappable_v<ErrorType>)
+		requires std::is_swappable_v<ErrorType>
+	{ std::swap(this->m_error, other.get()); }
+
+	friend constexpr void swap(error& left, error& right)
+	noexcept(noexcept(left.swap(right)))
+		requires std::is_swappable_v<ErrorType>
+	{ left.swap(right); }
+
+private:
+	ErrorType m_error;
+};
+
+template<typename T> error(T) -> error<T>;
+
 namespace detail::result_helpers
 {
 
