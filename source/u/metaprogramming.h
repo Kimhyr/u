@@ -12,9 +12,9 @@ namespace u
 
 template<typename ClassType, typename... ParameterTypes>
 struct is_explicity_constructible
-    : std::bool_constant<
-        std::is_constructible_v<ClassType, ParameterTypes...>
-        && !std::is_convertible_v<ClassType, ParameterTypes...>>
+	: std::bool_constant<
+		std::is_constructible_v<ClassType, ParameterTypes...>
+		&& !std::is_convertible_v<ClassType, ParameterTypes...>>
 {};
 
 template<typename T, typename... Ts>
@@ -22,9 +22,9 @@ constexpr bool is_explicity_constructible_v = is_explicity_constructible<T, Ts..
 
 template<typename T>
 struct is_cv
-    : std::bool_constant<
-        std::is_const_v<T>
-        && std::is_volatile_v<T>>
+	: std::bool_constant<
+		std::is_const_v<T>
+		&& std::is_volatile_v<T>>
 {};
 
 template<typename T>

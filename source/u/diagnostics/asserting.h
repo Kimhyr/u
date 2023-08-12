@@ -14,16 +14,16 @@ namespace detail
 
 template<typename T, T A, typename U, U B>
 constexpr void assert_equal(std::integral_constant<T, A>,
-                            std::integral_constant<U, B>)
+							std::integral_constant<U, B>)
 { static_assert(A == B, "equavalent assertion failed"); }
 
 }  // namespace detail
 
 #define U_ASSERT_EQUAL(a, b) \
-    assert_equal(constant<decltype(a), a>{}, constant<decltype(b), b>{})
+	assert_equal(constant<decltype(a), a>{}, constant<decltype(b), b>{})
 
-#if !defined U_PREFIX_MACROS
-#   define ASSERT_EQUAL(a, b) U_ASSERT_EQUAL
+#if defined U_ENABLE_UNPREFIXED_MACROS
+#	define ASSERT_EQUAL(a, b) U_ASSERT_EQUAL
 #endif
 
 }
