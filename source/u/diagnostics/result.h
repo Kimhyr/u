@@ -716,10 +716,8 @@ public:
 			result_t>);
 
 		if (this->m_has_value)
-			return std::invoke(
-				std::forward<F>(fn),
-				this->m_value);
-		else return result_t{u::error_tag, this->m_error};
+			return std::invoke(std::forward<F>(fn),this->m_value);
+		return result_t{u::error_tag, this->m_error};
 	}
 
 	template<typename F>
@@ -730,11 +728,9 @@ public:
 		static_assert(result::m_is_valid_error_function_result_v<
 			result_t>);
 
-		if (this->m_has_value) {
-			return std::invoke(
-				std::forward<F>(fn),
-				this->m_value);
-		} else return result_t{u::error_tag, this->m_error};
+		if (this->m_has_value)
+			return std::invoke(std::forward<F>(fn),this->m_value);
+		return result_t{u::error_tag, this->m_error};
 	}
 
 	template<typename F>
@@ -749,7 +745,7 @@ public:
 			return std::invoke(
 				std::forward<F>(fn),
 				std::move(this->m_error));
-		else return result_t{std::in_place, std::move(this->m_value)};
+		return result_t{std::in_place, std::move(this->m_value)};
 	}
 
 	template<typename F>
@@ -765,8 +761,70 @@ public:
 			return std::invoke(
 				std::forward<F>(fn),
 				std::move(this->m_error));
-		else return result_t{std::in_place, std::move(this->m_value)};
+		return result_t{std::in_place, std::move(this->m_value)};
 	}
+
+	template<typename F>
+	constexpr auto or_else(F&& fn) &
+		requires std::is_constructible_v<ValueType, ValueType&>
+	{
+		using result_t = result::m_function_result_t<F, ErrorType&>;
+		static_assert(result::m_is_valid_value_function_result_v<
+			result_t>);
+
+		if (this->m_has_value)
+			return result_t{std::in_place, this->m_value};
+		return std::invoke(std::forward<F>(fn), this->m_value);
+	}
+
+	template<typename F>
+	constexpr auto or_else(F&& fn) const&
+		requires std::is_constructible_v<ValueType, const ValueType&>
+	{
+		using result_t = result::m_function_result_t<F, const ErrorType&>;
+		static_assert(result::m_is_valid_value_function_result_v<
+			result_t>);
+
+		if (this->m_has_value)
+			return result_t{std::in_place, this->m_value};
+		return std::invoke(std::forward<F>(fn), this->m_value);
+	}
+
+	template<typename F>
+	constexpr auto or_else(F&& fn) &&
+		requires std::is_constructible_v<ValueType, ValueType&&>
+	{
+		using result_t = result::m_function_result_t<F, ErrorType&&>;
+		static_assert(result::m_is_valid_value_function_result_v<
+			result_t>);
+
+		if (this->m_has_value)
+			return result_t{
+				std::in_place,
+				std::move(this->m_value)};
+		return std::invoke(
+			std::forward<F>(fn),
+			std::move(this->m_value));
+	}	
+
+	template<typename F>
+	constexpr auto or_else(F&& fn) const&&
+		requires std::is_constructible_v<ValueType, const ValueType&&>
+	{
+		using result_t = result::m_function_result_t<
+			F,
+			const ErrorType&&>;
+		static_assert(result::m_is_valid_value_function_result_v<
+			result_t>);
+
+		if (this->m_has_value)
+			return result_t{
+				std::in_place,
+				std::move(this->m_value)};
+		return std::invoke(
+			std::forward<F>(fn),
+			std::move(this->m_value));
+	}	
 
 private:
 	union {
