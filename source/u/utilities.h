@@ -4,7 +4,7 @@
 #pragma once
 #define U_INCLUDED_UTILITIES_H
 
-namespace core
+namespace u
 {
 
 template<typename ...Ts>

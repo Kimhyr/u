@@ -6,6 +6,7 @@
 
 #include <u/config.h>
 
+#include <functional>
 #include <initializer_list>
 #include <stdexcept>
 #include <type_traits>
@@ -16,7 +17,24 @@
 namespace u
 {
 
-struct err_t {};
+template<typename ValueType, typename ErrorType>
+class result;
+
+template<typename T>
+struct is_result
+	: std::bool_constant<false>
+{};
+
+template<typename T, typename U>
+struct is_result<result<T, U>>
+	: std::bool_constant<true>
+{};
+
+template<typename T>
+constexpr bool is_result_v = false;
+
+template<typename T, typename V>
+constexpr bool is_result_v<u::result<T, V>> = true;
 
 template<typename ErrorType>
 class error;
@@ -36,6 +54,13 @@ struct is_error<u::error<T>>
 
 template<typename T>
 constexpr bool is_error_v = u::is_error<T>::value;
+
+struct error_tag_t
+{
+	explicit error_tag_t() = default;
+};
+
+inline constexpr u::error_tag_t error_tag{};
 
 template<typename T>
 struct is_valid_result
@@ -80,30 +105,33 @@ protected:
 	~bad_result_access() = default;
 };
 
-template<typename ErrorType>
+template<typename T>
 class bad_result_access
 	: public bad_result_access<void>
 {
-	static_assert(u::is_valid_error_v<ErrorType>);
-		
+	static_assert(u::is_valid_error_v<T>);
+
 public:
-	explicit bad_result_access(ErrorType error)
+	using error_type = T;
+
+
+	explicit bad_result_access(error_type error)
 		: m_error{error} {}
 
 	[[nodiscard]]
-	ErrorType& error() & noexcept
+	error_type& error() & noexcept
 	{ return this->m_error; }
 
 	[[nodiscard]]
-	ErrorType&& error() && noexcept
+	error_type&& error() && noexcept
 	{ return std::move(this->m_error); }
 
 	[[nodiscard]]
-	const ErrorType&& error() const&& noexcept
+	const error_type&& error() const&& noexcept
 	{ return std::move(this->m_error); }
 
 private:
-	ErrorType m_error;
+	error_type m_error;
 };
 
 namespace detail::result_helpers
@@ -200,6 +228,8 @@ public:
 		|| T<V, ErrorType>::value;
 
 private:
+	using value_type = ValueType;
+		
 	template<typename T, typename U>
 	static constexpr bool m_is_constructible_from_result_v =
 		conjunction_with_v<std::is_constructible, T, U>
@@ -247,6 +277,21 @@ private:
 		&& std::is_assignable_v<ErrorType&, const T&>
 		&& (std::is_nothrow_constructible_v<ErrorType, const T&>
 			|| disjunction_v<std::is_nothrow_move_constructible>);
+
+	template<typename F, typename T>
+	using m_function_result_t =
+		std::remove_cvref_t<
+			std::invoke_result_t<F&&, T&&>>;
+
+	template<typename T>
+	static constexpr bool m_is_valid_error_function_result_v =
+		u::is_error_v<T>
+		&& std::is_same_v<typename T::error_type, ErrorType>;
+
+	template<typename T>
+	static constexpr bool m_is_valid_value_function_result_v =
+		u::is_result_v<T>
+		&& std::is_same_v<typename T::value_type, ValueType>;
 
 public:
 	constexpr result()
@@ -372,7 +417,7 @@ public:
 
 	template<typename... Ts>
 		requires std::is_constructible_v<ErrorType, Ts...>
-	constexpr explicit result(err_t, Ts&&... args)
+	constexpr explicit result(u::error_tag_t, Ts&&... args)
 	noexcept(std::is_nothrow_constructible_v<ErrorType, Ts...>)
 		: m_value{std::forward<Ts>(args)...}
 	{}
@@ -380,7 +425,7 @@ public:
 	template<typename T, typename... Ts>
 		requires m_is_constructible_with_il_v<ErrorType, T, Ts...>
 	constexpr explicit result(
-		err_t,
+		u::error_tag_t,
 		std::initializer_list<T> list,
 		Ts&&...			 args)
 	noexcept(m_is_nothrow_constructible_with_il_v<ErrorType, T, Ts...>)
@@ -394,8 +439,8 @@ public:
 		requires disjunction_v<std::is_trivially_destructible>
 	{
 		if (this->m_has_value)
-			std::destroy_at(this->m_value);
-		else std::destroy_at(this->m_error);
+			std::destroy_at(std::addressof(this->m_value));
+		else std::destroy_at(std::addressof(this->m_error));
 	}
 
 	result& operator=(const result&) = delete;
@@ -448,6 +493,10 @@ public:
 		this->m_assign_error(std::move(error).error());
 		return *this;
 	}
+
+	//
+	// Observers
+	//
 
 	constexpr operator bool() const noexcept
 	{ return this->m_has_value; }
@@ -508,30 +557,6 @@ public:
 		return this->m_value;
 	}
 
-	template<std::convertible_to<ValueType> T>
-	[[nodiscard]]
-	constexpr ValueType value_or(T&& other_value) const&
-	noexcept(std::is_nothrow_copy_constructible_v<ValueType>
-		&& std::is_nothrow_convertible_v<T, ValueType>)
-		requires std::is_copy_constructible_v<ValueType>
-	{
-		if (this->m_has_value)
-			return this->m_value;
-		return static_cast<ValueType>(std::forward<T>(other_value));
-	}
-
-	template<std::convertible_to<ValueType> T>
-	[[nodiscard]]
-	constexpr ValueType value_or(T&& other_value) &&
-		noexcept(std::is_nothrow_move_constructible_v<ValueType>
-			&& std::is_nothrow_convertible_v<T, ValueType>)
-		requires std::is_move_constructible_v<ValueType>
-	{ 
-		if (this->m_has_value)
-			return std::move(this->m_value);
-		return static_cast<ValueType>(std::forward<T>(other_value));
-	} 
-
 	[[nodiscard]]
 	constexpr ErrorType& error() & noexcept
 	{ return this->m_error; }
@@ -548,6 +573,119 @@ public:
 	constexpr const ErrorType&& error() const&&
 	{ return std::move(this->m_error); }
 
+	template<typename T = ValueType>
+	[[nodiscard]]
+	constexpr ValueType value_or(T&& other_value) const&
+	noexcept(std::is_nothrow_copy_constructible_v<ValueType>
+		&& std::is_nothrow_convertible_v<T, ValueType>)
+		requires std::is_convertible_v<T, ValueType>
+			&& std::is_copy_constructible_v<ValueType>
+	{
+		if (this->m_has_value)
+			return this->m_value;
+		return static_cast<ValueType>(std::forward<T>(other_value));
+	}
+
+	template<typename T = ValueType>
+	[[nodiscard]]
+	constexpr ValueType value_or(T&& value) &&
+	noexcept(std::is_nothrow_move_constructible_v<ValueType>
+		&& std::is_nothrow_convertible_v<T, ValueType>)
+		requires std::is_convertible_v<T, ValueType>
+			&& std::is_move_constructible_v<ValueType>
+	{ 
+		if (this->m_has_value)
+			return std::move(this->m_value);
+		return static_cast<ValueType>(std::forward<T>(value));
+	} 
+
+	template<typename T = ErrorType>
+	[[nodiscard]]
+	constexpr ErrorType error_or(ErrorType&& error) const&
+		requires std::is_convertible_v<T, ErrorType>
+			&& std::is_copy_constructible_v<T>
+	{
+		if (this->m_has_value)
+			return std::forward<T>(error);
+		return this->m_error;
+	}
+
+	template<typename T = ErrorType>
+	[[nodiscard]]
+	constexpr ErrorType error_or(T&& error) &&
+		requires std::is_convertible_v<T, ErrorType>
+			&& std::is_constructible_v<ErrorType, T>
+	{
+		if (this->m_has_value)
+			return std::forward<T>(error);
+		return std::move(this->m_error);
+	}
+
+	//
+	// Monadic Operations
+	//
+
+	template<typename F>
+	constexpr auto and_then(F&& fn) &
+		requires std::is_constructible_v<ErrorType, ErrorType&>
+	{
+		using result_t = result::m_function_result_t<F, ValueType&>;
+		static_assert(result::m_is_valid_error_function_result_v<
+			result_t>);
+
+		if (this->m_has_value)
+			return std::invoke(
+				std::forward<F>(fn),
+				this->m_value);
+		else return result_t{u::error_tag, this->m_error};
+	}
+
+	template<typename F>
+	constexpr auto and_then(F&& fn) const&
+		requires std::is_constructible_v<ErrorType, const ErrorType&>
+	{
+		using result_t = result::m_function_result_t<F, const ValueType&>;
+		static_assert(result::m_is_valid_error_function_result_v<
+			result_t>);
+
+		if (this->m_has_value) {
+			return std::invoke(
+				std::forward<F>(fn),
+				this->m_value);
+		} else return result_t{u::error_tag, this->m_error};
+	}
+
+	template<typename F>
+	constexpr auto and_then(F&& fn) &&
+		requires std::is_constructible_v<ErrorType, ErrorType>
+	{
+		using result_t = result::m_function_result_t<F, ValueType&&>;
+		static_assert(result::m_is_valid_error_function_result_v<
+			result_t>);
+
+		if (!this->m_has_value)
+			return std::invoke(
+				std::forward<F>(fn),
+				std::move(this->m_error));
+		else return result_t{std::in_place, std::move(this->m_value)};
+	}
+
+	template<typename F>
+	constexpr auto and_then(F&& fn) const&&
+		requires std::is_constructible_v<ErrorType, const ErrorType>
+	{
+		using result_t = result::m_function_result_t<
+			F, const ValueType&&>;
+		static_assert(result::m_is_valid_error_function_result_v<
+			result_t>);
+
+		if (!this->m_has_value)
+			return std::invoke(
+				std::forward<F>(fn),
+				std::move(this->m_error));
+		else return result_t{std::in_place, std::move(this->m_value)};
+	}
+
 private:
 	union {
 		ValueType m_value;
@@ -558,25 +696,25 @@ private:
 	template<typename T>
 	constexpr void m_assign_value(T&& value) noexcept
 	{
-		if (!m_has_value) {
+		if (!this->m_has_value) {
 			detail::result_helpers::reconstruct(
 				std::addressof(this->m_value),
 				std::addressof(this->m_error),
 				std::forward<T>(value));
-			m_has_value = true;
-		} else m_value = std::forward<T>(value);
+			this->m_has_value = true;
+		} else this->m_value = std::forward<T>(value);
 	}
 
 	template<typename T>
 	constexpr void m_assign_error(T&& error) noexcept
 	{
-		if (m_has_value) {
+		if (this->m_has_value) {
 			detail::result_helpers::reconstruct(
 				std::addressof(this->m_value),
 				std::addressof(this->m_error),
 				std::forward<T>(error));
-			m_has_value = false;
-		} else m_error = std::forward<T>(error);
+			this->m_has_value = false;
+		} else this->m_error = std::forward<T>(error);
 	}
 };
 
